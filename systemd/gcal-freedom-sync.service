@@ -1,0 +1,19 @@
+[Unit]
+Description=Google Calendar → Freedom.to Sync Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/opt/gcal-freedom-sync
+EnvironmentFile=/opt/gcal-freedom-sync/.env
+Environment=LOG_FILE=/var/log/gcal-freedom-sync.log
+ExecStart=/opt/gcal-freedom-sync/venv/bin/python daemon.py
+Restart=on-failure
+RestartSec=30
+# Give headless Chromium enough memory
+MemoryMax=512M
+
+[Install]
+WantedBy=multi-user.target
