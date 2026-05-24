@@ -38,11 +38,11 @@ def append_work_block(log_path: str, user_name: str, started_at: datetime,
     log.debug(f"Logged block: {user_name} {duration_minutes}min on {local_date}")
 
 
-def read_blocks_for_dates(log_path: str, date_strs: set,
-                          member_names: list) -> dict:
-    totals = {name.lower(): 0 for name in member_names}
+def read_blocks_for_dates(log_path: str, date_strs: set, member_names: list) -> dict:
+    """Returns {name_lower: {'minutes': int, 'blocks': int}} for all members."""
+    stats = {name.lower(): {'minutes': 0, 'blocks': 0} for name in member_names}
     if not os.path.exists(log_path):
-        return totals
+        return stats
     with open(log_path) as f:
         for line in f:
             line = line.strip()
@@ -53,9 +53,10 @@ def read_blocks_for_dates(log_path: str, date_strs: set,
             except json.JSONDecodeError:
                 continue
             user = rec.get('user', '').lower()
-            if rec.get('date') in date_strs and user in totals:
-                totals[user] += rec.get('duration_minutes', 0)
-    return totals
+            if rec.get('date') in date_strs and user in stats:
+                stats[user]['minutes'] += rec.get('duration_minutes', 0)
+                stats[user]['blocks'] += 1
+    return stats
 
 
 # ------------------------------------------------------------------ #
@@ -69,13 +70,24 @@ def _fmt_duration(total_minutes: int) -> str:
     return f"{h} hr {m} min" if m else f"{h} hr"
 
 
-def build_leaderboard_message(period_label: str, totals: dict,
-                               member_names: list) -> str:
+def build_leaderboard_message(period_label: str, stats: dict, member_names: list,
+                               header_emoji: str = '📊', show_blocks: bool = True) -> str:
+    """stats: {name_lower: {'minutes': int, 'blocks': int}}"""
     order = {name.lower(): i for i, name in enumerate(member_names)}
-    ranked = sorted(totals.items(), key=lambda kv: (-kv[1], order.get(kv[0], 999)))
-    lines = [f"Focus recap — {period_label}", ""]
-    for rank, (name, minutes) in enumerate(ranked, start=1):
-        lines.append(f"{rank}. {name.title()} — {_fmt_duration(minutes)}")
+    ranked = sorted(stats.items(), key=lambda kv: (-kv[1]['minutes'], order.get(kv[0], 999)))
+    medals = ['🥇', '🥈', '🥉']
+    lines = [f"{header_emoji} Focus Recap — {period_label}", ""]
+    medal_rank = 0
+    for name, data in ranked:
+        minutes = data['minutes']
+        blocks = data['blocks']
+        if minutes == 0:
+            lines.append(f"   {name.title()} — —")
+        else:
+            prefix = medals[medal_rank] if medal_rank < 3 else f"{medal_rank + 1}."
+            block_str = f" ({blocks} block{'s' if blocks != 1 else ''})" if show_blocks else ""
+            lines.append(f"{prefix} {name.title()} — {_fmt_duration(minutes)}{block_str}")
+            medal_rank += 1
     return "\n".join(lines)
 
 
@@ -140,7 +152,7 @@ def _compute_streak(log_path: str, user_name: str, today_str: str) -> int:
     from datetime import date
     streak = 0
     check = date.fromisoformat(today_str)
-    while daily_totals.get(check.isoformat(), 0) >= 300:
+    while daily_totals.get(check.isoformat(), 0) >= 300:  # 5h threshold
         streak += 1
         check -= timedelta(days=1)
     return streak
@@ -160,7 +172,7 @@ def check_and_announce_milestones(log_path: str, sent_log_path: str, user_name: 
         )
 
     # 2. Daily milestone (3h and 5h) — fire once per user per day per threshold
-    daily_total = read_blocks_for_dates(log_path, {today_str}, [user_name]).get(user_name.lower(), 0)
+    daily_total = read_blocks_for_dates(log_path, {today_str}, [user_name]).get(user_name.lower(), {}).get('minutes', 0)
     _goal_emojis = {180: "💪", 300: "🔥"}
     for goal in _DAILY_GOALS:
         key = f"milestone_{goal}min:{user_name.lower()}:{today_str}"
@@ -212,7 +224,7 @@ def _maybe_send_daily(now_local: datetime, family_cfg: dict,
     from datetime import date
     d = date.fromisoformat(yesterday)
     label = d.strftime("%A, %B %-d")
-    msg = build_leaderboard_message(label, totals, member_names)
+    msg = build_leaderboard_message(label, totals, member_names, header_emoji='📊')
     _send(token, family_cfg['group_chat_id'], msg)
     sent[key] = datetime.now(timezone.utc).isoformat()
 
@@ -233,7 +245,7 @@ def _maybe_send_weekly(now_local: datetime, family_cfg: dict,
         family_cfg['blocks_log_path'], date_strs, member_names
     )
     label = f"Week of {sunday.strftime('%b %-d')}–{saturday.strftime('%b %-d')}"
-    msg = build_leaderboard_message(label, totals, member_names)
+    msg = build_leaderboard_message(label, totals, member_names, header_emoji='📅')
     _send(token, family_cfg['group_chat_id'], msg)
     sent[key] = datetime.now(timezone.utc).isoformat()
 
