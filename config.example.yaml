@@ -32,3 +32,12 @@ freedom:
 notifications:
   telegram:
     token: "YOUR_TELEGRAM_BOT_TOKEN"       # from @BotFather
+
+family:
+  timezone: "America/New_York"             # zoneinfo key, e.g. "America/Chicago"
+  group_chat_id: -1001234567890            # negative integer — add bot to group, send a msg, check getUpdates
+  blocks_log_path: "blocks_log.jsonl"
+  sent_log_path: "family_sent_log.json"
+  members:                                 # all family members in leaderboard order (ties broken by this order)
+    - name: "alice"
+    - name: "bob"

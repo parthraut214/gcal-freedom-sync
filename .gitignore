@@ -7,6 +7,8 @@ state*.json
 config.yaml
 .env
 freedom_api_calls.json
+blocks_log.jsonl
+family_sent_log.json
 
 # Python
 __pycache__/

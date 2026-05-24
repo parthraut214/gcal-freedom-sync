@@ -262,7 +262,7 @@ async def telegram_bot_router(config: dict, users_data: list, stop_event: asynci
 
 async def run_daemon(config: dict, user_cfg: dict, cal: CalendarClient,
                      state: StateManager, freedom: FreedomApiClient,
-                     stop_event: asyncio.Event):
+                     stop_event: asyncio.Event, family_cfg: dict = None):
     log = logging.getLogger(f"daemon.{user_cfg['name']}")
 
     calendars = user_cfg['calendars']
@@ -352,18 +352,36 @@ async def run_daemon(config: dict, user_cfg: dict, cal: CalendarClient,
             elif not active_event and state.is_active:
                 started = datetime.fromisoformat(state.started_at) if state.started_at else None
                 actual_min = int((now - started).total_seconds() / 60) if started else 0
-                label = f"{state._state.blocklist.title()} Block" if state._state.blocklist else "Block"
-                end_msg = f"[UPDATE] {label} complete: {state.event_summary} ({_fmt_duration(actual_min)})"
+                blocklist_name = state._state.blocklist  # capture before set_inactive() clears state
+                event_summary_captured = state.event_summary
+                label = f"{blocklist_name.title()} Block" if blocklist_name else "Block"
+                end_msg = f"[UPDATE] {label} complete: {event_summary_captured} ({_fmt_duration(actual_min)})"
+
+                def _log_block_if_work():
+                    if blocklist_name == "work" and family_cfg and started:
+                        from zoneinfo import ZoneInfo
+                        from family_reporter import append_work_block
+                        append_work_block(
+                            log_path=family_cfg['blocks_log_path'],
+                            user_name=user_cfg['name'],
+                            started_at=started,
+                            ended_at=now,
+                            duration_minutes=actual_min,
+                            summary=event_summary_captured or "",
+                            tz=ZoneInfo(family_cfg['timezone']),
+                        )
 
                 if state.locked:
                     log.info(f"Event ended → locked session, Freedom timer will handle stop (schedule={state.schedule_id})")
                     state.set_inactive()
+                    _log_block_if_work()
                     notify(end_msg)
                 else:
                     log.info(f"Event ended → stopping Freedom block (schedule={state.schedule_id})")
                     ok = freedom.stop_session(state.schedule_id) if state.schedule_id else True
                     if ok:
                         state.set_inactive()
+                        _log_block_if_work()
                         notify(end_msg)
                     else:
                         log.error("stop_session failed — will retry next poll")
@@ -411,11 +429,16 @@ async def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop_event.set)
 
+    from family_reporter import family_reporter_scheduler
+
+    family_cfg = config.get('family')
     tasks = [
-        run_daemon(config, user_cfg, cal, state, freedom, stop_event)
+        run_daemon(config, user_cfg, cal, state, freedom, stop_event, family_cfg)
         for user_cfg, cal, state in users_data
     ]
     tasks.append(telegram_bot_router(config, users_data, stop_event))
+    if family_cfg:
+        tasks.append(family_reporter_scheduler(config, stop_event))
 
     await asyncio.gather(*tasks)
 
