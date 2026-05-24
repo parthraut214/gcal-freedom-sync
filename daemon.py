@@ -360,7 +360,9 @@ async def run_daemon(config: dict, user_cfg: dict, cal: CalendarClient,
                 def _log_block_if_work():
                     if blocklist_name == "work" and family_cfg and started:
                         from zoneinfo import ZoneInfo
-                        from family_reporter import append_work_block
+                        from family_reporter import append_work_block, check_and_announce_milestones
+                        tz = ZoneInfo(family_cfg['timezone'])
+                        today_str = now.astimezone(tz).date().isoformat()
                         append_work_block(
                             log_path=family_cfg['blocks_log_path'],
                             user_name=user_cfg['name'],
@@ -368,7 +370,16 @@ async def run_daemon(config: dict, user_cfg: dict, cal: CalendarClient,
                             ended_at=now,
                             duration_minutes=actual_min,
                             summary=event_summary_captured or "",
-                            tz=ZoneInfo(family_cfg['timezone']),
+                            tz=tz,
+                        )
+                        check_and_announce_milestones(
+                            log_path=family_cfg['blocks_log_path'],
+                            sent_log_path=family_cfg.get('sent_log_path', 'family_sent_log.json'),
+                            user_name=user_cfg['name'],
+                            duration_minutes=actual_min,
+                            today_str=today_str,
+                            token=config['notifications']['telegram']['token'],
+                            group_chat_id=family_cfg['group_chat_id'],
                         )
 
                 if state.locked:

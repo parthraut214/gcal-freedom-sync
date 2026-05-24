@@ -116,6 +116,75 @@ def _send(token: str, chat_id: int, message: str) -> None:
 
 
 # ------------------------------------------------------------------ #
+# Milestone announcements
+# ------------------------------------------------------------------ #
+
+_LONG_BLOCK_MIN = 90        # single block threshold
+_DAILY_GOALS = [180, 300]   # 3h and 5h day milestones
+_STREAK_MIN = 3             # minimum streak to announce
+
+
+def _compute_streak(log_path: str, user_name: str, today_str: str) -> int:
+    dates_with_blocks: set = set()
+    if os.path.exists(log_path):
+        with open(log_path) as f:
+            for line in f:
+                try:
+                    rec = json.loads(line.strip())
+                    if rec.get('user') == user_name.lower():
+                        dates_with_blocks.add(rec['date'])
+                except Exception:
+                    pass
+    from datetime import date
+    streak = 0
+    check = date.fromisoformat(today_str)
+    while check.isoformat() in dates_with_blocks:
+        streak += 1
+        check -= timedelta(days=1)
+    return streak
+
+
+def check_and_announce_milestones(log_path: str, sent_log_path: str, user_name: str,
+                                   duration_minutes: int, today_str: str,
+                                   token: str, group_chat_id: int) -> None:
+    sent = _load_sent_log(sent_log_path)
+    name = user_name.title()
+    messages = []
+
+    # 1. Long single block
+    if duration_minutes >= _LONG_BLOCK_MIN:
+        messages.append(
+            f"{name} just completed a {_fmt_duration(duration_minutes)} focus block. Locked in!"
+        )
+
+    # 2. Daily milestone (3h and 5h) — fire once per user per day per threshold
+    daily_total = read_blocks_for_dates(log_path, {today_str}, [user_name]).get(user_name.lower(), 0)
+    for goal in _DAILY_GOALS:
+        key = f"milestone_{goal}min:{user_name.lower()}:{today_str}"
+        if daily_total >= goal and key not in sent:
+            messages.append(
+                f"{name} just hit {_fmt_duration(goal)} of focus work today. Way to go!"
+            )
+            sent[key] = datetime.now(timezone.utc).isoformat()
+
+    # 3. Focus streak — fire once per user per day when streak >= threshold
+    streak_key = f"milestone_streak:{user_name.lower()}:{today_str}"
+    if streak_key not in sent:
+        streak = _compute_streak(log_path, user_name, today_str)
+        if streak >= _STREAK_MIN:
+            messages.append(
+                f"{name} is on a {streak}-day focus streak. Keep it up!"
+            )
+            sent[streak_key] = datetime.now(timezone.utc).isoformat()
+
+    for msg in messages:
+        _send(token, group_chat_id, msg)
+
+    if messages:
+        _save_sent_log(sent_log_path, sent)
+
+
+# ------------------------------------------------------------------ #
 # Report logic
 # ------------------------------------------------------------------ #
 
